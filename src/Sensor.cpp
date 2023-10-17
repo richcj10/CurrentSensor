@@ -22,32 +22,40 @@ char RelayState = 0;
 char ReadSensors(){
   digitalWrite(SENSORPWR, HIGH);
   delay(50);
-  float VoltSense = analogRead(VOLTSENSE)/1025.0*5*2;
+  //float VoltSense = analogRead(VOLTSENSE)/1025.0*5*2;
   //Serial.print(" SensorVoltage = ");
   //Serial.println(VoltSense);
-    if((VoltSense >= SenorVoltageLowThreshold/100) and (VoltSense <= SenorVoltageHighThreshold/100)){
+/*     if((VoltSense >= SenorVoltageLowThreshold/100) and (VoltSense <= SenorVoltageHighThreshold/100)){
     LeakSenor[0] = SENSOROK;
   }
   else{
     LeakSenor[0] = SENSORFAULT;
     digitalWrite(SENSORPWR, LOW);
     return 0;
-  }
+  } */
   double SensorA = 0;
-  double SensorB = 0;
-  double SensorC = 0;
-  for(char i = 0;i<5;i++){
-    SensorA += analogRead(LEAKSENSOR1);
-    SensorB += analogRead(LEAKSENSOR2);
-    SensorC += analogRead(LEAKSENSOR3);
+  int NextSample = 0;
+  int LastSample = analogRead(LEAKSENSOR1);
+  int Ref = 0;
+  int max = 0, reading;
+  for(int i = 0; i<20; i++) {
+    reading = analogRead(LEAKSENSOR1); // change number for pin you are using
+    if(reading > max){
+      max = reading;
+    }
+    Ref = analogRead(VOLTSENSE);
   }
-  SensorA = SensorA/5;
-  SensorB = SensorB/5;
-  SensorC = SensorC/5;
-  LeakSenor[1] = SensorValueCheck(SensorA);
-  LeakSenor[2] = SensorValueCheck(SensorB);
-  LeakSenor[3] = SensorValueCheck(SensorC);
-  digitalWrite(SENSORPWR, LOW);
+  float Voltage = (max/1023.0)*5.0;
+  float RefVolt = (Ref/1023.0)*5.0;
+  float Current = abs(Voltage-RefVolt);
+  //SensorB = SensorB/5;
+  //SensorC = SensorC/5;
+  //Serial.print(SensorA);
+  //Serial.print(" ");
+  ///Serial.print(SensorB);
+  //Serial.print(" ");
+  Serial.println(Current);
+  //digitalWrite(SENSORPWR, LOW);
   return 0;
 }
 
