@@ -1,133 +1,118 @@
 #include "Sensor.h"
-#include <Arduino.h>
-
 #include "Define.h"
+#include <Arduino.h>
+#include <avr/delay.h>
 
-//These values can be modified 
-unsigned int SenorWaterFault = 550;
-unsigned int SenorDisconectedThreshold = 600;
+// ── Configurable thresholds ───────────────────────────────────────────────────
+unsigned int SenorWaterFault            = 550;
+unsigned int SenorDisconectedThreshold  = 600;
+int          SenorVoltageHighThreshold  = 800;
+int          SenorVoltageLowThreshold   = 270;
 
-//This is hard coded, board Level issue
-int SenorVoltageHighThreshold = 800;
-int SenorVoltageLowThreshold = 270;
-float Vin = 0;
-int VinAdc[VOLT_AVG];      // the readings from the analog input
-int readIndex = 0;              // the index of the current reading
-long Vintotal = 0;     
+// ── Sensor state ──────────────────────────────────────────────────────────────
+float CurrentSenor[4] = {0, 0, 0, 0};
+char  RelayState = 0;
 
-char LeakSenor[5] = {SENSOROK,SENSOROK,SENSOROK,SENSOROK};
+// ── Init ──────────────────────────────────────────────────────────────────────
 
-char RelayState = 0;
+void adcinit() {
+    // AVCC reference, right-adjusted, ADC0 selected
+    ADMUX = 0b01000000;
+    // Enable ADC, prescaler /128
+    ADCSRA |= (1 << ADEN) | (1 << ADPS2) | (0 << ADPS1) | (0 << ADPS0);
+}
 
-char ReadSensors(){
-  digitalWrite(SENSORPWR, HIGH);
-  delay(50);
-  //float VoltSense = analogRead(VOLTSENSE)/1025.0*5*2;
-  //Serial.print(" SensorVoltage = ");
-  //Serial.println(VoltSense);
-/*     if((VoltSense >= SenorVoltageLowThreshold/100) and (VoltSense <= SenorVoltageHighThreshold/100)){
-    LeakSenor[0] = SENSOROK;
-  }
-  else{
-    LeakSenor[0] = SENSORFAULT;
+void SensorStart() {
+    pinMode(SENSORPWR, OUTPUT);
     digitalWrite(SENSORPWR, LOW);
-    return 0;
-  } */
-  double SensorA = 0;
-  int NextSample = 0;
-  int LastSample = analogRead(LEAKSENSOR1);
-  int Ref = 0;
-  int max = 0, reading;
-  for(int i = 0; i<20; i++) {
-    reading = analogRead(LEAKSENSOR1); // change number for pin you are using
-    if(reading > max){
-      max = reading;
+    adcinit();
+    // Warm up ADC — discard first readings after power-on
+    for (uint8_t i = 0; i < 10; i++) adcread(ADC_VIN);
+}
+
+// ── Low-level ADC read (direct AVR register access) ───────────────────────────
+
+int adcread(unsigned char channel) {
+    ADMUX = 0x40 | (channel & 0x07);
+    ADCSRA |= (1 << ADSC);
+    while (!(ADCSRA & (1 << ADIF)));
+    ADCSRA |= (1 << ADIF);
+    _delay_ms(1);
+    return ADCW;
+}
+
+// ── Acquisition ───────────────────────────────────────────────────────────────
+
+void ReadSensors() {
+    digitalWrite(SENSORPWR, HIGH);
+    delay(50);
+
+    // VIN — 10k/3k voltage divider: V_in = ADC * (5.0/1023) * (13.0/3.0)
+    CurrentSenor[SENSOR_INPUT_VIN] = adcread(ADC_VIN) * (5.0f / 1023.0f) * (13.0f / 3.0f);
+
+    float Voltage, RefVolt;
+    int   Ref, maxVal, reading;
+
+    // Input 1
+    maxVal = 0;
+    for (int i = 0; i < 20; i++) {
+        reading = adcread(LEAKSENSOR1);
+        if (reading > maxVal) maxVal = reading;
     }
-    Ref = analogRead(VOLTSENSE);
-  }
-  float Voltage = (max/1023.0)*5.0;
-  float RefVolt = (Ref/1023.0)*5.0;
-  float Current = abs(Voltage-RefVolt);
-  //SensorB = SensorB/5;
-  //SensorC = SensorC/5;
-  //Serial.print(SensorA);
-  //Serial.print(" ");
-  ///Serial.print(SensorB);
-  //Serial.print(" ");
-  Serial.println(Current);
-  //digitalWrite(SENSORPWR, LOW);
-  return 0;
+    Ref     = adcread(VOLTSENSE);
+    Voltage  = (maxVal / 1023.0f) * 5.0f;
+    RefVolt  = (Ref    / 1023.0f) * 5.0f;
+    CurrentSenor[SENSOR_INPUT_1] = abs((Voltage - RefVolt) / 0.07f) - 0.58f;
+    if (CurrentSenor[SENSOR_INPUT_1] < 0) CurrentSenor[SENSOR_INPUT_1] = 0;
+
+    // Input 2
+    maxVal = 0;
+    for (int i = 0; i < 20; i++) {
+        reading = adcread(LEAKSENSOR2);
+        if (reading > maxVal) maxVal = reading;
+    }
+    Ref     = adcread(VOLTSENSE);
+    Voltage  = (maxVal / 1023.0f) * 5.0f;
+    RefVolt  = (Ref    / 1023.0f) * 5.0f;
+    CurrentSenor[SENSOR_INPUT_2] = abs((Voltage - RefVolt) / 0.07f) - 0.58f;
+    if (CurrentSenor[SENSOR_INPUT_2] < 0) CurrentSenor[SENSOR_INPUT_2] = 0;
+
+    // Input 3
+    maxVal = 0;
+    for (int i = 0; i < 20; i++) {
+        reading = adcread(LEAKSENSOR3);
+        if (reading > maxVal) maxVal = reading;
+    }
+    Ref     = adcread(VOLTSENSE);
+    Voltage  = (maxVal / 1023.0f) * 5.0f;
+    RefVolt  = (Ref    / 1023.0f) * 5.0f;
+    CurrentSenor[SENSOR_INPUT_3] = abs((Voltage - RefVolt) / 0.07f) - 0.58f;
+    if (CurrentSenor[SENSOR_INPUT_3] < 0) CurrentSenor[SENSOR_INPUT_3] = 0;
+
+    digitalWrite(SENSORPWR, LOW);
 }
 
-void SampleVin(){
-  Vintotal = Vintotal - VinAdc[readIndex];
-  // read from the sensor:
-  VinAdc[readIndex] = analogRead(VIN);
-  // add the reading to the total:
-  Vintotal = Vintotal + VinAdc[readIndex];
-  // advance to the next position in the array:
-  readIndex = readIndex + 1;
-
-  // if we're at the end of the array...
-  if (readIndex >= VOLT_AVG) {
-    // ...wrap around to the beginning:
-    readIndex = 0;
-  }
-
-  // calculate the average:
-  Vin = (Vintotal / VOLT_AVG)*(5.1/1024)*5.6;
-  //Serial.print("Vin = ");
-  //Serial.println(Vin);
+float GetSensorValues(char Type) {
+    switch (Type) {
+        case SENSOR_INPUT_VIN: return CurrentSenor[SENSOR_INPUT_VIN];
+        case SENSOR_INPUT_1:   return CurrentSenor[SENSOR_INPUT_1];
+        case SENSOR_INPUT_2:   return CurrentSenor[SENSOR_INPUT_2];
+        case SENSOR_INPUT_3:   return CurrentSenor[SENSOR_INPUT_3];
+        default:               return 0;
+    }
 }
 
-char SensorValueCheck(double ValueIn){
-  if(ValueIn > SenorVoltageHighThreshold){
-    return SENSORHIGHFAULT;
-  }
-  else if((ValueIn > SenorWaterFault) and (ValueIn < SenorDisconectedThreshold)){
-    return SENSOROK;
-  }
-  else{
+// ── Threshold setters ─────────────────────────────────────────────────────────
+
+void SetSensorWaterDetect(unsigned int Value)   { SenorWaterFault           = Value; }
+void SensorWaterDisconected(unsigned int Value) { SenorDisconectedThreshold = Value; }
+
+// ── Misc ──────────────────────────────────────────────────────────────────────
+
+char SensorValueCheck(double ValueIn) {
+    if (ValueIn > SenorVoltageHighThreshold)                              return SENSORHIGHFAULT;
+    if (ValueIn > SenorWaterFault && ValueIn < SenorDisconectedThreshold) return SENSOROK;
     return SENSORWATERDETECT;
-  }
 }
 
-char RelayCheck(){
-  char error = 0;
-  unsigned char k;
-  for( k= 0;k<5;k++){
-    if(LeakSenor[k] != SENSOROK){
-      error++;
-    }
-  }
-  if(error){
-    digitalWrite(RELAY, HIGH);
-    RelayState = 1;
-    return  0;
-  }
-  else{
-    digitalWrite(RELAY, LOW);
-    RelayState = 0;
-    return  1;
-  }
-}
-
-char ReadSensorValues(unsigned char Value){
-    return LeakSenor[Value];
-}
-
-char ReadRelayState(){
-    return RelayState;
-}
-
-void SetSensorWaterDetect(unsigned int Value){
-    SenorWaterFault = Value;
-}
-
-void SensorWaterDisconected(unsigned int Value){
-    SenorDisconectedThreshold = Value;
-}
-
-float GetSensorValues(char Sensor){
-  return Vin;
-}
+char ReadRelayState() { return RelayState; }

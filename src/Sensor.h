@@ -1,20 +1,27 @@
 #ifndef SENSOR_H
 #define SENSOR_H
 
-#define SENSOR_BIAS 0
-#define SENSOR_INPUT_1 1
-#define SENSOR_INPUT_2 2
-#define SENSOR_INPUT_3 3
-#define SENSOR_INPUT_VIN 4
+// ── Sensor value type indices (argument to GetSensorValues) ───────────────────
+#define SENSOR_INPUT_VIN 0
+#define SENSOR_INPUT_1   1
+#define SENSOR_INPUT_2   2
+#define SENSOR_INPUT_3   3
 
-char SensorValueCheck(double ValueIn);
-char ReadSensors();
-char RelayCheck();
-char ReadRelayState();
-char ReadSensorValues(unsigned char Value);
+// ── Init ──────────────────────────────────────────────────────────────────────
+void SensorStart();
+void adcinit();
+
+// ── Acquisition ───────────────────────────────────────────────────────────────
+void  ReadSensors();
+float GetSensorValues(char Type);
+int   adcread(unsigned char channel);
+
+// ── Threshold setters ─────────────────────────────────────────────────────────
 void SetSensorWaterDetect(unsigned int Value);
 void SensorWaterDisconected(unsigned int Value);
-float GetSensorValues(char Sensor);
-void SampleVin();
+
+// ── Misc ──────────────────────────────────────────────────────────────────────
+char  SensorValueCheck(double ValueIn);
+char  ReadRelayState();
 
 #endif

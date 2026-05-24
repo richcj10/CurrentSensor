@@ -1,112 +1,72 @@
 #include <Arduino.h>
-#include <ArduinoRS485.h> // ArduinoModbus depends on the ArduinoRS485 library
-#include <ArduinoModbus.h>
-
-#include "EEPROMData.h"
-#include "Sensor.h"
+#include "ModBusBL.h"
 #include "Define.h"
+#include "Sensor.h"
+#include "EEPROMData.h"
 
-unsigned long previousMillis = 0;
+ModBusBL modbus(DIR, 2, 6, 4, 0);
+
+unsigned long previousMillis    = 0;
 unsigned long previousLEDMillis = 0;
-unsigned int SensorTestTime = 1;
+unsigned int  SensorTestTime    = SENSORSCANRATE;
 
-void ComunicationUpdate(){
-/*   ModbusRTUServer.poll();
-  long holdingRegisterValue = ModbusRTUServer.holdingRegisterRead(0);
-  if (holdingRegisterValue == SENSOR_CHANGE_ADDRESS) {
-    //NewAddress
-    SetAddressFromEEPROM((char)ModbusRTUServer.holdingRegisterRead(1));
-  }
-  else if (holdingRegisterValue == SENSOR_CHANGE_SCANRATE) {
-    //NewScanRate
-    SetScanRateFromEEPROM((char)ModbusRTUServer.holdingRegisterRead(1));
-  }
-  else if (holdingRegisterValue == SENSOR_CHANGE_FAULT) {
-     SetSensorWaterDetect((int)ModbusRTUServer.holdingRegisterRead(1));
-  }
-  else if (holdingRegisterValue == SENSOR_CHANGE_SENSOR_OPEN) {
-    SensorWaterDisconected((int)ModbusRTUServer.holdingRegisterRead(1));
-  }
+void ComunicationUpdate() {
+    modbus.update();
 
-  ModbusRTUServer.inputRegisterWrite(2, GetSensorValues(SENSOR_INPUT_VIN)*100);
-  ModbusRTUServer.inputRegisterWrite(3, ReadSensorValues(SENSOR_BIAS));
-  ModbusRTUServer.inputRegisterWrite(4, ReadSensorValues(SENSOR_INPUT_1));
-  ModbusRTUServer.inputRegisterWrite(5, ReadSensorValues(SENSOR_INPUT_2));
-  ModbusRTUServer.inputRegisterWrite(6, ReadSensorValues(SENSOR_INPUT_3));
+    // Handle holding register commands
+    uint16_t cmd = modbus.getHolding(0);
+    if (cmd == SENSOR_CHANGE_SCANRATE) {
+        SensorTestTime = modbus.getHolding(1);
+        SetScanRateFromEEPROM((char)modbus.getHolding(1));
+        modbus.setHolding(0, 0);
+    }
 
-  ModbusRTUServer.coilWrite(SENSOR_RELAY, ReadRelayState()); */
+    // Update live input registers
+    modbus.setInput(2, (uint16_t)(GetSensorValues(SENSOR_INPUT_VIN) * 100));
+    modbus.setInput(3, (uint16_t)(GetSensorValues(SENSOR_INPUT_1)   * 100));
+    modbus.setInput(4, (uint16_t)(GetSensorValues(SENSOR_INPUT_2)   * 100));
+    modbus.setInput(5, (uint16_t)(GetSensorValues(SENSOR_INPUT_3)   * 100));
 }
 
 void setup() {
-  Serial.begin(38400);
+    pinMode(LED,   OUTPUT);
+    pinMode(RELAY, OUTPUT);
+    digitalWrite(LED,   LOW);
+    digitalWrite(RELAY, LOW);
 
-  pinMode(DIR,OUTPUT);
-  pinMode(LED,OUTPUT);
-  pinMode(SENSORPWR,OUTPUT);
-  pinMode(RELAY,OUTPUT);
-  digitalWrite(DIR,HIGH);
-  digitalWrite(LED,LOW);
-  digitalWrite(SENSORPWR,LOW);
-  digitalWrite(RELAY,LOW);
+    modbus.begin(38400);
 
-/*   char Adr = GetAddressFromEEPROM();
-  if(Adr == -1){
-    if (!ModbusRTUServer.begin(LEAKSENSORADDRESS, 38400)) {
-      Serial.println("Failed to start Modbus RTU Server!");
-      while (1);
-    }
-  }
-  else{
-    if (!ModbusRTUServer.begin(Adr, 38400)) {
-      Serial.println("Failed to start Modbus RTU Server!");
-      while (1);
-    }
-  } */
+    // Static identity registers — set once
+    modbus.setInput(0, ((uint16_t)CURRENTSENSORTYPE << 8) | CURRENTSENSORVERSION);
+    modbus.setInput(1, CURRENTSENSORTYPE);
+    modbus.setCoil(SENSOR_SCAN_EN, true); // Start scanning by default
 
-/*   // configure a single coil at address 0x00
-  ModbusRTUServer.configureCoils(0x01, 4); //Relay Control [Sensor "scan" Enable,Enable blinking LED,Enable Auto Relay Control, Relay]
-  ModbusRTUServer.configureInputRegisters(0x01, 6);  //Leak Sensor Values [SensorType,BiasVoltage Test,S1 Test,S2 Test,S3 Test]
-  ModbusRTUServer.configureHoldingRegisters(0x01, 3); //Control I/O 
-  ModbusRTUServer.inputRegisterWrite(1, LEAKSENSORTYPE);// Add Sensor Type, this is fixed. 
-  ModbusRTUServer.coilWrite(SENSOR_SCAN_EN, 1); //Sensor Scan Enable - Default ON
-  ModbusRTUServer.coilWrite(SENSOR_LED_CONTROL, 1); //LED Control - Default ON
-  ModbusRTUServer.coilWrite(AUTO_SENSOR_RELAY_CONTROL, 1); //Auto Relay Control - Default ON
-  ModbusRTUServer.coilWrite(SENSOR_RELAY, 0); //Relay Control - Default OFF */
+    // Restore scan rate from EEPROM if saved
+    char rate = GetScanRateFromEEPROM();
+    if (rate > 0) SensorTestTime = (unsigned int)rate;
 
-/*   char ScanRate = GetScanRateFromEEPROM();
-  if(ScanRate != -1){
-    SensorTestTime = ScanRate;
-  }
-  else{
-    SensorTestTime = SENSORSCANRATE;
-  } */
-  char k = 0;
-  for(k=0;k<10;k++){
-    SampleVin();
-  }
-  ADCSRA = (ADCSRA & 0xf8) | 0x04; // set 16 times division
+    SensorStart();
 }
 
 void loop() {
-  ComunicationUpdate();
-  unsigned long currentMillis = millis();
-  //if(ModbusRTUServer.coilRead(SENSOR_SCAN_EN)){
-  if (currentMillis - previousMillis >= SensorTestTime*SENSORTESTTIMEMULTIPLYER) {
-    previousMillis = currentMillis;
-    ReadSensors();
-    SampleVin();
-/*       if(ModbusRTUServer.coilRead(AUTO_SENSOR_RELAY_CONTROL)){
-        RelayCheck();
-      } */
-  }
-  //}
-  //if(ModbusRTUServer.coilRead(SENSOR_LED_CONTROL)){
-  if (currentMillis - previousLEDMillis >= 500) {
-    previousLEDMillis = currentMillis;
-    digitalWrite(LED,!digitalRead(LED));
-  }
-  //}
-/*   if(ModbusRTUServer.coilRead(AUTO_SENSOR_RELAY_CONTROL) == 0){
-    digitalWrite(RELAY, ModbusRTUServer.coilRead(SENSOR_RELAY));
-  } */
+    unsigned long currentMillis = millis();
+
+    ComunicationUpdate();
+
+    if (modbus.getCoil(SENSOR_SCAN_EN)) {
+        if (currentMillis - previousMillis >= SensorTestTime * SENSORTESTTIMEMULTIPLYER) {
+            previousMillis = currentMillis;
+            ReadSensors();
+        }
+    }
+
+    //if (modbus.getCoil(SENSOR_LED_CONTROL)) {
+        if (currentMillis - previousLEDMillis >= 500) {
+            previousLEDMillis = currentMillis;
+            digitalWrite(LED, !digitalRead(LED));
+        }
+    //}
+
+    // Master controls relay directly via SENSOR_RELAY coil
+    digitalWrite(RELAY, modbus.getCoil(SENSOR_RELAY));
 }
