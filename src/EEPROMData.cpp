@@ -4,10 +4,16 @@
 
 char GetScanRateFromEEPROM() {
     uint8_t val = EEPROM.read(SAMPLERATE);
-    return (val == 0xFF) ? -1 : (char)val;
+    uint8_t inv = EEPROM.read(SAMPLERATE_INV);
+    if (val == 0xFF || inv != (uint8_t)~val) return -1;
+    return (char)val;
 }
 
 char SetScanRateFromEEPROM(char NewRate) {
-    EEPROM.update(SAMPLERATE, (uint8_t)NewRate);
-    return (EEPROM.read(SAMPLERATE) == (uint8_t)NewRate) ? 1 : -1;
+    uint8_t val = (uint8_t)NewRate;
+    EEPROM.update(SAMPLERATE,     val);
+    EEPROM.update(SAMPLERATE_INV, (uint8_t)~val);
+    if (EEPROM.read(SAMPLERATE) != val) return -1;
+    if (EEPROM.read(SAMPLERATE_INV) != (uint8_t)~val) return -1;
+    return 1;
 }

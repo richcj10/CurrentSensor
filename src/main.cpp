@@ -37,13 +37,17 @@ void setup() {
     modbus.begin(38400);
 
     // Static identity registers — set once
-    modbus.setInput(0, ((uint16_t)CURRENTSENSORTYPE << 8) | CURRENTSENSORVERSION);
+    modbus.setInput(0, CURRENTSENSORVERSION);
     modbus.setInput(1, CURRENTSENSORTYPE);
     modbus.setCoil(SENSOR_SCAN_EN, true); // Start scanning by default
 
-    // Restore scan rate from EEPROM if saved
+    // Restore scan rate from EEPROM; rewrite default if missing or corrupt
     char rate = GetScanRateFromEEPROM();
-    if (rate > 0) SensorTestTime = (unsigned int)rate;
+    if (rate > 0) {
+        SensorTestTime = (unsigned int)rate;
+    } else {
+        SetScanRateFromEEPROM((char)SENSORSCANRATE);
+    }
 
     SensorStart();
 }
